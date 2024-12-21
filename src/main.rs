@@ -4,9 +4,10 @@ use std::sync::mpsc;
 use kalosm::language::{Bert, Chat, EmbedderExt, Llama, LlamaSource, TextStream};
 use notify::{Event, RecursiveMode, Result, Watcher};
 use pgvector::{self, Vector};
-use rocket::fairing::AdHoc;
+use rocket::fairing::{Fairing, Info, Kind};
 use rocket::serde::Serialize;
 use rocket::{futures::lock::Mutex, serde::json::Json, State};
+use rocket::{Orbit, Rocket};
 use rocket_db_pools::{deadpool_postgres, Connection, Database};
 
 #[macro_use]
@@ -31,30 +32,54 @@ async fn rocket() -> _ {
             ),
         })
         .attach(PgVector::init())
-        .attach(AdHoc::on_liftoff("Listener", |_| {
-            Box::pin(async move {
-                let (sender, receiver) = mpsc::channel::<Result<Event>>();
-                let mut watcher = notify::recommended_watcher(sender).unwrap();
-                watcher
-                    .watch(Path::new("./documents"), RecursiveMode::Recursive)
-                    .unwrap();
-                info!("Listener Initialized");
+        .attach(Listener)
+        .mount("/", routes![generate_text])
+}
 
-                for event in receiver {
-                    match event {
-                        Ok(event) => {
-                            if let notify::EventKind::Create(_) = event.kind {
-                                info!("New file created");
-                            }
-                        }
-                        Err(e) => {
-                            error!("Error: {:?}", e);
+struct Listener;
+
+#[rocket::async_trait]
+impl Fairing for Listener {
+    fn info(&self) -> Info {
+        Info {
+            name: "Listener",
+            kind: Kind::Liftoff,
+        }
+    }
+
+    fn on_liftoff<'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        _rocket: &'life1 Rocket<Orbit>,
+    ) -> ::core::pin::Pin<
+        Box<dyn ::core::future::Future<Output = ()> + ::core::marker::Send + 'async_trait>,
+    >
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        Box::pin(async move {
+            let (sender, receiver) = mpsc::channel::<Result<Event>>();
+            let mut watcher = notify::recommended_watcher(sender).unwrap();
+            watcher
+                .watch(Path::new("./documents"), RecursiveMode::Recursive)
+                .unwrap();
+            info!("Listener Initialized");
+
+            for event in receiver {
+                match event {
+                    Ok(event) => {
+                        if let notify::EventKind::Create(_) = event.kind {
+                            info!("New file created");
                         }
                     }
+                    Err(e) => {
+                        error!("Error: {:?}", e);
+                    }
                 }
-            })
-        }))
-        .mount("/", routes![generate_text])
+            }
+        })
+    }
 }
 
 #[derive(Database)]
