@@ -1,0 +1,14 @@
+[package]
+name = "chat-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kalosm = { version = "0.3.2", features = ["language"] }
+notify = "7.0.0"
+pgvector = { version = "0.4.0", features = ["postgres"] }
+rocket = { version = "0.5.1", features = ["json"] }
+
+[dependencies.rocket_db_pools]
+version = "0.2.0"
+features = ["deadpool_postgres"]
