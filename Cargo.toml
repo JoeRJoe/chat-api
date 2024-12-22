@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+file-chunker = "0.1.1"
 kalosm = { version = "0.3.2", features = ["language"] }
 notify = "7.0.0"
+pdf-extract = "0.7.10"
 pgvector = { version = "0.4.0", features = ["postgres"] }
 rocket = { version = "0.5.1", features = ["json"] }
 

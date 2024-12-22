@@ -1,14 +1,16 @@
+use std::fs::File;
 use std::path::Path;
 use std::sync::mpsc;
 
+use file_chunker::FileChunker;
 use kalosm::language::{Bert, Chat, EmbedderExt, Llama, LlamaSource, TextStream};
 use notify::{Event, RecursiveMode, Result, Watcher};
-use pgvector::{self, Vector};
+use pgvector::Vector;
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::serde::Serialize;
 use rocket::{futures::lock::Mutex, serde::json::Json, State};
 use rocket::{Orbit, Rocket};
-use rocket_db_pools::{deadpool_postgres, Connection, Database};
+use rocket_db_pools::{deadpool_postgres, Database};
 
 #[macro_use]
 extern crate rocket;
@@ -16,9 +18,6 @@ extern crate rocket;
 #[launch]
 async fn rocket() -> _ {
     rocket::build()
-        .manage(EmbeddingWrapper {
-            model: Mutex::new(Bert::new().await.unwrap()),
-        })
         .manage(ChatWrapper {
             chat: Mutex::new(
                 Chat::builder(
@@ -38,7 +37,6 @@ async fn rocket() -> _ {
 
 struct Listener;
 
-#[rocket::async_trait]
 impl Fairing for Listener {
     fn info(&self) -> Info {
         Info {
@@ -64,13 +62,39 @@ impl Fairing for Listener {
             watcher
                 .watch(Path::new("./documents"), RecursiveMode::Recursive)
                 .unwrap();
-            info!("Listener Initialized");
+            let db = PgVector::fetch(_rocket).unwrap();
+            let vector = db.get().await.unwrap();
+            let embedder = Bert::new().await.unwrap();
 
+            info!("Listener Initialized");
             for event in receiver {
                 match event {
                     Ok(event) => {
                         if let notify::EventKind::Create(_) = event.kind {
-                            info!("New file created");
+                            for path in event.paths {
+                                let file = File::open(&path).unwrap();
+                                let chunker = FileChunker::new(&file).unwrap();
+                                let bytes_vector = chunker.chunks(1024, None).unwrap();
+
+                                for bytes in bytes_vector {
+                                    let text = pdf_extract::extract_text_from_mem(bytes)
+                                        .expect("Failed to extract text");
+
+                                    let embeddings = embedder
+                                        .embed(text.as_str())
+                                        .await
+                                        .expect("Failed to embed text");
+
+                                    vector.execute("INSERT INTO document (embedding, text, name) VALUES ($1, $2, $3)", 
+                                &[
+                                    &Vector::from(embeddings.to_vec()),
+                                    &text,
+                                    &path.to_str().unwrap().split("/").last().expect("Failed to get document name")
+                                ])
+                                .await
+                                .expect("Failed to insert document");
+                                }
+                            }
                         }
                     }
                     Err(e) => {
@@ -90,10 +114,6 @@ struct ChatWrapper {
     chat: Mutex<Chat>,
 }
 
-struct EmbeddingWrapper {
-    model: Mutex<Bert>,
-}
-
 #[derive(Serialize)]
 #[serde(crate = "rocket::serde")]
 struct GeneratedText<'a> {
@@ -103,27 +123,9 @@ struct GeneratedText<'a> {
 
 #[get("/<prompt>")]
 async fn generate_text<'a>(
-    vector: Connection<PgVector>,
     chat_wrapper: &State<ChatWrapper>,
-    embedding_wrapper: &State<EmbeddingWrapper>,
     prompt: &'a str,
 ) -> Json<GeneratedText<'a>> {
-    let embedding = embedding_wrapper
-        .model
-        .lock()
-        .await
-        .embed(prompt)
-        .await
-        .unwrap();
-
-    vector
-        .execute(
-            "INSERT INTO items (embedding, testo) VALUES ($1, $2)",
-            &[&Vector::from(embedding.to_vec()), &prompt],
-        )
-        .await
-        .unwrap();
-
     Json(GeneratedText {
         prompt,
         text: chat_wrapper
