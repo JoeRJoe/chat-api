@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-kalosm = { version = "0.3.2", features = ["language"] }
-pdf-extract = "0.7.10"
-rocket = { version = "0.5.1", features = ["json"] }
-pgvector = { version = "0.4.0", features = ["postgres"]}
+kalosm = { workspace = true }
+pdf-extract = { workspace = true }
+rocket = { workspace = true }
+pgvector = { workspace = true }
 
 [dependencies.rocket_db_pools]
 version = "0.2.0"
