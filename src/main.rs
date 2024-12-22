@@ -1,15 +1,11 @@
-use std::fs::File;
 use std::path::Path;
 use std::sync::mpsc;
 
-use file_chunker::FileChunker;
-use kalosm::language::{Bert, Chat, EmbedderExt, Llama, LlamaSource, TextStream};
+use kalosm::language::{Bert, EmbedderExt};
 use notify::{Event, RecursiveMode, Result, Watcher};
 use pgvector::Vector;
-use rocket::fairing::{Fairing, Info, Kind};
-use rocket::serde::Serialize;
-use rocket::{futures::lock::Mutex, serde::json::Json, State};
-use rocket::{Orbit, Rocket};
+use rocket::fairing::{self, Fairing, Info, Kind};
+use rocket::Rocket;
 use rocket_db_pools::{deadpool_postgres, Database};
 
 #[macro_use]
@@ -18,21 +14,9 @@ extern crate rocket;
 #[launch]
 async fn rocket() -> _ {
     rocket::build()
-        .manage(ChatWrapper {
-            chat: Mutex::new(
-                Chat::builder(
-                    Llama::builder()
-                        .with_source(LlamaSource::llama_3_2_3b_chat())
-                        .build()
-                        .await
-                        .unwrap(),
-                )
-                .build(),
-            ),
-        })
         .attach(PgVector::init())
         .attach(Listener)
-        .mount("/", routes![generate_text])
+        .mount("/", routes![])
 }
 
 struct Listener;
@@ -41,19 +25,22 @@ impl Fairing for Listener {
     fn info(&self) -> Info {
         Info {
             name: "Listener",
-            kind: Kind::Liftoff,
+            kind: Kind::Ignite,
         }
     }
 
-    fn on_liftoff<'life0, 'life1, 'async_trait>(
+    fn on_ignite<'life0, 'async_trait>(
         &'life0 self,
-        _rocket: &'life1 Rocket<Orbit>,
+        rocket: Rocket<rocket::Build>,
     ) -> ::core::pin::Pin<
-        Box<dyn ::core::future::Future<Output = ()> + ::core::marker::Send + 'async_trait>,
+        Box<
+            dyn ::core::future::Future<Output = rocket::fairing::Result>
+                + ::core::marker::Send
+                + 'async_trait,
+        >,
     >
     where
         'life0: 'async_trait,
-        'life1: 'async_trait,
         Self: 'async_trait,
     {
         Box::pin(async move {
@@ -62,7 +49,7 @@ impl Fairing for Listener {
             watcher
                 .watch(Path::new("./documents"), RecursiveMode::Recursive)
                 .unwrap();
-            let db = PgVector::fetch(_rocket).unwrap();
+            let db = PgVector::fetch(&rocket).unwrap();
             let vector = db.get().await.unwrap();
             let embedder = Bert::new().await.unwrap();
 
@@ -72,27 +59,25 @@ impl Fairing for Listener {
                     Ok(event) => {
                         if let notify::EventKind::Create(_) = event.kind {
                             for path in event.paths {
-                                let file = File::open(&path).unwrap();
-                                let chunker = FileChunker::new(&file).unwrap();
-                                let bytes_vector = chunker.chunks(1024, None).unwrap();
+                                let bytes = std::fs::read(&path).expect("Failed to read file");
+                                let text = pdf_extract::extract_text_from_mem(&bytes)
+                                    .expect("Failed to extract text");
+                                let text_chunked: Vec<_> = text.split("\n").collect();
 
-                                for bytes in bytes_vector {
-                                    let text = pdf_extract::extract_text_from_mem(bytes)
-                                        .expect("Failed to extract text");
+                                for t in text_chunked {
+                                    if !t.is_empty() {
+                                        let embeddings =
+                                            embedder.embed(t).await.expect("Failed to embed text");
 
-                                    let embeddings = embedder
-                                        .embed(text.as_str())
+                                        vector.execute("INSERT INTO document (embedding, text, name) VALUES ($1, $2, $3)", 
+                                        &[
+                                            &Vector::from(embeddings.to_vec()),
+                                            &t,
+                                            &path.to_str().unwrap().split("/").last().expect("Failed to get document name")
+                                        ])
                                         .await
-                                        .expect("Failed to embed text");
-
-                                    vector.execute("INSERT INTO document (embedding, text, name) VALUES ($1, $2, $3)", 
-                                &[
-                                    &Vector::from(embeddings.to_vec()),
-                                    &text,
-                                    &path.to_str().unwrap().split("/").last().expect("Failed to get document name")
-                                ])
-                                .await
-                                .expect("Failed to insert document");
+                                        .expect("Failed to insert document");
+                                    }
                                 }
                             }
                         }
@@ -102,6 +87,7 @@ impl Fairing for Listener {
                     }
                 }
             }
+            fairing::Result::Ok(rocket)
         })
     }
 }
@@ -109,31 +95,3 @@ impl Fairing for Listener {
 #[derive(Database)]
 #[database("pgvector")]
 struct PgVector(deadpool_postgres::Pool);
-
-struct ChatWrapper {
-    chat: Mutex<Chat>,
-}
-
-#[derive(Serialize)]
-#[serde(crate = "rocket::serde")]
-struct GeneratedText<'a> {
-    prompt: &'a str,
-    text: String,
-}
-
-#[get("/<prompt>")]
-async fn generate_text<'a>(
-    chat_wrapper: &State<ChatWrapper>,
-    prompt: &'a str,
-) -> Json<GeneratedText<'a>> {
-    Json(GeneratedText {
-        prompt,
-        text: chat_wrapper
-            .chat
-            .lock()
-            .await
-            .add_message(prompt)
-            .all_text()
-            .await,
-    })
-}

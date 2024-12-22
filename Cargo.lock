@@ -76,6 +76,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1fd03a028ef38ba2276dce7e33fcd6369c158a1bca17946c4b1b701891c1ff7"
 
 [[package]]
+name = "api"
+version = "0.1.0"
+dependencies = [
+ "kalosm",
+ "pdf-extract",
+ "pgvector",
+ "rocket",
+ "rocket_db_pools",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -94,7 +105,7 @@ dependencies = [
  "byteorder",
  "heed",
  "log",
- "memmap2 0.9.5",
+ "memmap2",
  "ordered-float",
  "rand 0.8.5",
  "rayon",
@@ -344,7 +355,7 @@ dependencies = [
  "byteorder",
  "gemm",
  "half",
- "memmap2 0.9.5",
+ "memmap2",
  "num-traits",
  "num_cpus",
  "rand 0.8.5",
@@ -409,7 +420,6 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 name = "chat-api"
 version = "0.1.0"
 dependencies = [
- "file-chunker",
  "kalosm",
  "notify",
  "pdf-extract",
@@ -1067,16 +1077,6 @@ dependencies = [
  "toml",
  "uncased",
  "version_check",
-]
-
-[[package]]
-name = "file-chunker"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92828425bb36590609d28014a252d6f0f71b698875a2b131fae367c627b6c656"
-dependencies = [
- "anyhow",
- "memmap2 0.5.10",
 ]
 
 [[package]]
@@ -2486,15 +2486,6 @@ name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
-
-[[package]]
-name = "memmap2"
-version = "0.5.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83faa42c0a078c393f6b29d5db232d8be22776a891f8f56e5284faee4a20b327"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "memmap2"
