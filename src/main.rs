@@ -47,6 +47,7 @@ struct EmbedderWrapper {
 #[derive(Serialize)]
 #[serde(crate = "rocket::serde")]
 struct GeneratedText<'a> {
+    context: String,
     prompt: &'a str,
     text: String,
 }
@@ -71,7 +72,7 @@ async fn generate_text<'a>(
         "Rispondi in maniera semplice e concisa. Contesto : {}. Domanda: {}",
         vector
             .query(
-                "SELECT text FROM document ORDER BY embedding <-> $1 LIMIT 5",
+                "SELECT text FROM document ORDER BY embedding <-> $1 LIMIT 2",
                 &[&embedded_prompt_vector],
             )
             .await
@@ -84,6 +85,7 @@ async fn generate_text<'a>(
     );
 
     Json(GeneratedText {
+        context: context.clone(),
         prompt,
         text: chat_wrapper
             .chat
