@@ -18,13 +18,11 @@ async fn rocket() -> _ {
         .manage(ChatWrapper {
             chat: Mutex::new(
                 Chat::builder(
-                    Llama::builder()
-                        .with_source(LlamaSource::llama_3_2_3b_chat())
-                        .build()
+                    Llama::new_chat()
                         .await
                         .unwrap(),
                 )
-                .with_system_prompt("Rispondi in maniera semplice e concisa, prendi solo le informazioni contenute nel contesto")
+                .with_system_prompt("Questo assistente risponde in maniera semplice e concisa, in italiano, prendendo principalmente le informazioni contenute nel contesto")
                 .build(),
             ),
         })
@@ -69,7 +67,7 @@ async fn generate_text<'a>(
     );
 
     let context = format!(
-        "Rispondi in maniera semplice e concisa. Contesto : {}. Domanda: {}",
+        "Contesto : {}. Domanda: {}",
         vector
             .query(
                 "SELECT text FROM document ORDER BY embedding <-> $1 LIMIT 2",
