@@ -1,2 +1,0 @@
-[default.databases.pgvector]
-url = "postgresql://postgres:postgres@localhost:5432/postgres"

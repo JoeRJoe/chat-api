@@ -1,12 +1,10 @@
-use std::path::Path;
-use std::sync::mpsc;
+use std::vec;
 
-use kalosm::language::{Bert, EmbedderExt};
-use notify::{Event, RecursiveMode, Result, Watcher};
+use kalosm::language::{Bert, Chat, EmbedderExt, Llama, LlamaSource, TextStream};
 use pgvector::Vector;
-use rocket::fairing::{self, Fairing, Info, Kind};
-use rocket::Rocket;
-use rocket_db_pools::{deadpool_postgres, Database};
+use rocket::serde::Serialize;
+use rocket::{futures::lock::Mutex, serde::json::Json, State};
+use rocket_db_pools::{deadpool_postgres, Connection, Database};
 
 #[macro_use]
 extern crate rocket;
@@ -14,84 +12,85 @@ extern crate rocket;
 #[launch]
 async fn rocket() -> _ {
     rocket::build()
-        .attach(PgVector::init())
-        .attach(Listener)
-        .mount("/", routes![])
-}
-
-struct Listener;
-
-impl Fairing for Listener {
-    fn info(&self) -> Info {
-        Info {
-            name: "Listener",
-            kind: Kind::Ignite,
-        }
-    }
-
-    fn on_ignite<'life0, 'async_trait>(
-        &'life0 self,
-        rocket: Rocket<rocket::Build>,
-    ) -> ::core::pin::Pin<
-        Box<
-            dyn ::core::future::Future<Output = rocket::fairing::Result>
-                + ::core::marker::Send
-                + 'async_trait,
-        >,
-    >
-    where
-        'life0: 'async_trait,
-        Self: 'async_trait,
-    {
-        Box::pin(async move {
-            let (sender, receiver) = mpsc::channel::<Result<Event>>();
-            let mut watcher = notify::recommended_watcher(sender).unwrap();
-            watcher
-                .watch(Path::new("./documents"), RecursiveMode::Recursive)
-                .unwrap();
-            let db = PgVector::fetch(&rocket).unwrap();
-            let vector = db.get().await.unwrap();
-            let embedder = Bert::new().await.unwrap();
-
-            info!("Listener Initialized");
-            for event in receiver {
-                match event {
-                    Ok(event) => {
-                        if let notify::EventKind::Create(_) = event.kind {
-                            for path in event.paths {
-                                let bytes = std::fs::read(&path).expect("Failed to read file");
-                                let text = pdf_extract::extract_text_from_mem(&bytes)
-                                    .expect("Failed to extract text");
-                                let text_chunked: Vec<_> = text.split("\n").collect();
-
-                                for t in text_chunked {
-                                    if !t.is_empty() {
-                                        let embeddings =
-                                            embedder.embed(t).await.expect("Failed to embed text");
-
-                                        vector.execute("INSERT INTO document (embedding, text, name) VALUES ($1, $2, $3)", 
-                                        &[
-                                            &Vector::from(embeddings.to_vec()),
-                                            &t,
-                                            &path.to_str().unwrap().split("/").last().expect("Failed to get document name")
-                                        ])
-                                        .await
-                                        .expect("Failed to insert document");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Error: {:?}", e);
-                    }
-                }
-            }
-            fairing::Result::Ok(rocket)
+        .manage(EmbedderWrapper {
+            embedder: Bert::new().await.unwrap(),
         })
-    }
+        .manage(ChatWrapper {
+            chat: Mutex::new(
+                Chat::builder(
+                    Llama::builder()
+                        .with_source(LlamaSource::llama_3_2_3b_chat())
+                        .build()
+                        .await
+                        .unwrap(),
+                )
+                .with_system_prompt("Rispondi in maniera semplice e concisa, prendi solo le informazioni contenute nel contesto")
+                .build(),
+            ),
+        })
+        .attach(PgVector::init())
+        .mount("/", routes![generate_text])
 }
 
 #[derive(Database)]
 #[database("pgvector")]
 struct PgVector(deadpool_postgres::Pool);
+
+struct ChatWrapper {
+    chat: Mutex<Chat>,
+}
+
+struct EmbedderWrapper {
+    embedder: Bert,
+}
+
+#[derive(Serialize)]
+#[serde(crate = "rocket::serde")]
+struct GeneratedText<'a> {
+    prompt: &'a str,
+    text: String,
+}
+
+#[post("/", data = "<prompt>")]
+async fn generate_text<'a>(
+    vector: Connection<PgVector>,
+    embedder_wrapper: &State<EmbedderWrapper>,
+    chat_wrapper: &State<ChatWrapper>,
+    prompt: &'a str,
+) -> Json<GeneratedText<'a>> {
+    let embedded_prompt_vector = Vector::from(
+        embedder_wrapper
+            .embedder
+            .embed(prompt)
+            .await
+            .expect("Failed to embed prompt")
+            .to_vec(),
+    );
+
+    let context = format!(
+        "Rispondi in maniera semplice e concisa. Contesto : {}. Domanda: {}",
+        vector
+            .query(
+                "SELECT text FROM document ORDER BY embedding <-> $1 LIMIT 5",
+                &[&embedded_prompt_vector],
+            )
+            .await
+            .expect("Failed to find nearest neighbors")
+            .iter()
+            .map(|row| row.get::<_, String>(0))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        prompt
+    );
+
+    Json(GeneratedText {
+        prompt,
+        text: chat_wrapper
+            .chat
+            .lock()
+            .await
+            .add_message(context)
+            .all_text()
+            .await,
+    })
+}

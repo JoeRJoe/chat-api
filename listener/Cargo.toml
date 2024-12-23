@@ -1,5 +1,5 @@
 [package]
-name = "api"
+name = "listener"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,6 +8,7 @@ kalosm = { workspace = true }
 pdf-extract = { workspace = true }
 rocket = { workspace = true }
 pgvector = { workspace = true }
+notify = "7.0.0"
 
 [dependencies.rocket_db_pools]
 version = "0.2.0"
