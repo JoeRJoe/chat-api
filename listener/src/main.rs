@@ -93,14 +93,20 @@ impl Fairing for Listener {
                                 }
                                 bar.inc(1);
                             }
+                            bar.finish();
 
                             for chunk in neighbors {
                                 if chunk.is_empty() {
                                     continue;
                                 }
 
-                                let embeddings =
-                                    embedder.embed(&chunk).await.expect("Failed to embed text");
+                                let embeddings = match embedder.embed(&chunk).await {
+                                    Ok(embeddings) => embeddings,
+                                    Err(_) => {
+                                        info!("Failed to embed a chunk");
+                                        continue;
+                                    }
+                                };
 
                                 vector.execute("INSERT INTO document (embedding, text, name) VALUES ($1, $2, $3)", 
                                         &[
@@ -111,7 +117,6 @@ impl Fairing for Listener {
                                         .await
                                         .expect("Failed to insert document");
                             }
-                            bar.finish();
                             info!("Embedded {}", path.display());
                         }
                     }
