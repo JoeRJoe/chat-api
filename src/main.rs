@@ -1,6 +1,6 @@
 use std::vec;
 
-use kalosm::language::{Bert, Chat, EmbedderExt, Llama, LlamaSource, TextStream};
+use kalosm::language::{Bert, Chat, EmbedderExt, Llama, TextStream};
 use pgvector::Vector;
 use rocket::serde::Serialize;
 use rocket::{futures::lock::Mutex, serde::json::Json, State};
