@@ -73,9 +73,8 @@ impl Fairing for Listener {
                                 info!("Embedding {}...", path.display());
                                 let bytes = std::fs::read(&path).expect("Failed to read file");
                                 let text = pdf_extract::extract_text_from_mem(&bytes)
-                                    .expect("Filed to extract text")
-                                    .replace("\n", "");
-                                let chunks = text.split(".").collect::<Vec<_>>();
+                                    .expect("Filed to extract text");
+                                let chunks = text.split("\n\n").collect::<Vec<_>>();
                                 let bar = ProgressBar::new(chunks.len() as u64);
                                 let mut neighbors = vec!["".to_string(); chunks.len()];
 
