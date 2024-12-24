@@ -59,53 +59,50 @@ impl Fairing for Listener {
             let embedder = Bert::new().await.unwrap();
 
             info!("Listener Initialized");
-            for event in receiver {
-                match event {
-                    Ok(event) => match event.kind {
-                        notify::EventKind::Create(_)
-                        | notify::EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
-                            for path in event.paths {
-                                if path.extension().unwrap() != "pdf" {
-                                    info!("{} is not a pdf file", path.display());
+            for event in receiver.into_iter().flatten() {
+                match event.kind {
+                    notify::EventKind::Create(_)
+                    | notify::EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
+                        for path in event.paths {
+                            if path.extension().unwrap() != "pdf" {
+                                info!("{} is not a pdf file", path.display());
+                                continue;
+                            }
+
+                            info!("Embedding {}...", path.display());
+                            let bytes = std::fs::read(&path).expect("Failed to read file");
+                            let text = pdf_extract::extract_text_from_mem(&bytes)
+                                .expect("Filed to extract text");
+                            let chunks = text.split("\n\n").collect::<Vec<_>>();
+                            let bar = ProgressBar::new(chunks.len() as u64);
+                            let mut neighbors = vec!["".to_string(); chunks.len()];
+
+                            for (i, chunk_a) in chunks.iter().enumerate() {
+                                let embed_a =
+                                    embedder.embed(chunk_a).await.expect("Failed to embed text");
+                                for chunk_b in chunks.iter().skip(i + 1) {
+                                    let embed_b = embedder
+                                        .embed(chunk_b)
+                                        .await
+                                        .expect("Failed to embed text");
+                                    let is_neighbor = embed_a.cosine_similarity(&embed_b) > 0.7;
+                                    neighbors[i] = chunk_a.to_string();
+                                    if is_neighbor {
+                                        neighbors[i] += format!("\n{}", chunk_b).as_str();
+                                    }
+                                }
+                                bar.inc(1);
+                            }
+
+                            for chunk in neighbors {
+                                if chunk.is_empty() {
                                     continue;
                                 }
 
-                                info!("Embedding {}...", path.display());
-                                let bytes = std::fs::read(&path).expect("Failed to read file");
-                                let text = pdf_extract::extract_text_from_mem(&bytes)
-                                    .expect("Filed to extract text");
-                                let chunks = text.split("\n\n").collect::<Vec<_>>();
-                                let bar = ProgressBar::new(chunks.len() as u64);
-                                let mut neighbors = vec!["".to_string(); chunks.len()];
+                                let embeddings =
+                                    embedder.embed(&chunk).await.expect("Failed to embed text");
 
-                                for (i, chunk_a) in chunks.iter().enumerate() {
-                                    let embed_a = embedder
-                                        .embed(chunk_a)
-                                        .await
-                                        .expect("Failed to embed text");
-                                    for chunk_b in chunks.iter().skip(i + 1) {
-                                        let embed_b = embedder
-                                            .embed(chunk_b)
-                                            .await
-                                            .expect("Failed to embed text");
-                                        let is_neighbor = embed_a.cosine_similarity(&embed_b) > 0.7;
-                                        neighbors[i] = chunk_a.to_string();
-                                        if is_neighbor {
-                                            neighbors[i] += format!("\n{}", chunk_b).as_str();
-                                        }
-                                    }
-                                    bar.inc(1);
-                                }
-
-                                for chunk in neighbors {
-                                    if chunk.is_empty() {
-                                        continue;
-                                    }
-
-                                    let embeddings =
-                                        embedder.embed(&chunk).await.expect("Failed to embed text");
-
-                                    vector.execute("INSERT INTO document (embedding, text, name) VALUES ($1, $2, $3)", 
+                                vector.execute("INSERT INTO document (embedding, text, name) VALUES ($1, $2, $3)", 
                                         &[
                                             &Vector::from(embeddings.to_vec()),
                                             &chunk,
@@ -113,37 +110,34 @@ impl Fairing for Listener {
                                         ])
                                         .await
                                         .expect("Failed to insert document");
-                                }
-                                bar.finish();
-                                info!("Embedded {}", path.display());
                             }
+                            bar.finish();
+                            info!("Embedded {}", path.display());
                         }
-                        notify::EventKind::Remove(_)
-                        | notify::EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
-                            for path in event.paths {
-                                if path.extension().unwrap() != "pdf" {
-                                    info!("{} is not a pdf file", path.display());
-                                    continue;
-                                }
-
-                                let name = path
-                                    .to_str()
-                                    .unwrap()
-                                    .split("/")
-                                    .last()
-                                    .expect("Failed to get document name");
-                                vector
-                                    .execute("DELETE FROM document WHERE name = $1", &[&name])
-                                    .await
-                                    .expect("Failed to delete document");
-                                info!("Removed {}", path.display());
-                            }
-                        }
-                        _ => {}
-                    },
-                    Err(e) => {
-                        error!("Error: {:?}", e);
                     }
+                    notify::EventKind::Remove(_)
+                    | notify::EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+                        for path in event.paths {
+                            if path.extension().unwrap() != "pdf" {
+                                info!("{} is not a pdf file", path.display());
+                                continue;
+                            }
+
+                            let name = path
+                                .to_str()
+                                .unwrap()
+                                .split("/")
+                                .last()
+                                .expect("Failed to get document name");
+
+                            vector
+                                .execute("DELETE FROM document WHERE name = $1", &[&name])
+                                .await
+                                .expect("Failed to delete document");
+                            info!("Removed {}", path.display());
+                        }
+                    }
+                    _ => {}
                 }
             }
             fairing::Result::Ok(rocket)
