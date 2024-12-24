@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::mpsc;
 
 use kalosm::language::{Bert, EmbedderExt};
+use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, RecursiveMode, Result, Watcher};
 use pgvector::Vector;
 use rocket::fairing::{self, Fairing, Info, Kind};
@@ -47,7 +48,10 @@ impl Fairing for Listener {
             let (sender, receiver) = mpsc::channel::<Result<Event>>();
             let mut watcher = notify::recommended_watcher(sender).unwrap();
             watcher
-                .watch(Path::new("./documents"), RecursiveMode::Recursive)
+                .watch(
+                    Path::new("/home/giorgio-minerba/Documenti/Embeddings"),
+                    RecursiveMode::Recursive,
+                )
                 .unwrap();
             let db = PgVector::fetch(&rocket).unwrap();
             let vector = db.get().await.unwrap();
@@ -56,8 +60,8 @@ impl Fairing for Listener {
             info!("Listener Initialized");
             for event in receiver {
                 match event {
-                    Ok(event) => {
-                        if let notify::EventKind::Create(_) = event.kind {
+                    Ok(event) => match event.kind {
+                        notify::EventKind::Create(_) | notify::EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
                             for path in event.paths {
                                 if path.extension().unwrap() != "pdf" {
                                     info!("{} is not a pdf file", path.display());
@@ -108,7 +112,26 @@ impl Fairing for Listener {
                                 }
                             }
                         }
-                    }
+                        notify::EventKind::Remove(_) | notify::EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+                            for path in event.paths {
+                                if path.extension().unwrap() != "pdf" {
+                                    info!("{} is not a pdf file", path.display());
+                                    continue;
+                                }
+                                let name = path
+                                    .to_str()
+                                    .unwrap()
+                                    .split("/")
+                                    .last()
+                                    .expect("Failed to get document name");
+                                vector
+                                    .execute("DELETE FROM document WHERE name = $1", &[&name])
+                                    .await
+                                    .expect("Failed to delete document");
+                            }
+                        }
+                        _ => {}
+                    },
                     Err(e) => {
                         error!("Error: {:?}", e);
                     }
