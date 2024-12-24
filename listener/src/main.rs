@@ -69,14 +69,33 @@ impl Fairing for Listener {
                                     .expect("Filed to extract text")
                                     .replace("\n", "");
                                 let chunks = text.split(".").collect::<Vec<_>>();
+                                let mut neighbors = vec!["".to_string(); chunks.len()];
 
-                                for chunk in chunks {
+                                for (i, chunk_a) in chunks.iter().enumerate() {
+                                    let embed_a = embedder
+                                        .embed(chunk_a)
+                                        .await
+                                        .expect("Failed to embed text");
+                                    for chunk_b in chunks.iter().skip(i + 1) {
+                                        let embed_b = embedder
+                                            .embed(chunk_b)
+                                            .await
+                                            .expect("Failed to embed text");
+                                        let is_neighbor = embed_a.cosine_similarity(&embed_b) > 0.7;
+                                        neighbors[i] = chunk_a.to_string();
+                                        if is_neighbor {
+                                            neighbors[i] += format!("\n{}", chunk_b).as_str();
+                                        }
+                                    }
+                                }
+
+                                for chunk in neighbors {
                                     if chunk.is_empty() {
                                         continue;
                                     }
 
                                     let embeddings =
-                                        embedder.embed(chunk).await.expect("Failed to embed text");
+                                        embedder.embed(&chunk).await.expect("Failed to embed text");
 
                                     vector.execute("INSERT INTO document (embedding, text, name) VALUES ($1, $2, $3)", 
                                         &[
