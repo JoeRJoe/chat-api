@@ -9,6 +9,7 @@ pdf-extract = { workspace = true }
 rocket = { workspace = true }
 pgvector = { workspace = true }
 notify = "7.0.0"
+indicatif = "0.17.9"
 
 [dependencies.rocket_db_pools]
 version = "0.2.0"

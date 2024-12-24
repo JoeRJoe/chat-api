@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::mpsc;
 
+use indicatif::ProgressBar;
 use kalosm::language::{Bert, EmbedderExt};
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, RecursiveMode, Result, Watcher};
@@ -61,18 +62,21 @@ impl Fairing for Listener {
             for event in receiver {
                 match event {
                     Ok(event) => match event.kind {
-                        notify::EventKind::Create(_) | notify::EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
+                        notify::EventKind::Create(_)
+                        | notify::EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
                             for path in event.paths {
                                 if path.extension().unwrap() != "pdf" {
                                     info!("{} is not a pdf file", path.display());
                                     continue;
                                 }
 
+                                info!("Embedding {}...", path.display());
                                 let bytes = std::fs::read(&path).expect("Failed to read file");
                                 let text = pdf_extract::extract_text_from_mem(&bytes)
                                     .expect("Filed to extract text")
                                     .replace("\n", "");
                                 let chunks = text.split(".").collect::<Vec<_>>();
+                                let bar = ProgressBar::new(chunks.len() as u64);
                                 let mut neighbors = vec!["".to_string(); chunks.len()];
 
                                 for (i, chunk_a) in chunks.iter().enumerate() {
@@ -91,6 +95,7 @@ impl Fairing for Listener {
                                             neighbors[i] += format!("\n{}", chunk_b).as_str();
                                         }
                                     }
+                                    bar.inc(1);
                                 }
 
                                 for chunk in neighbors {
@@ -110,14 +115,18 @@ impl Fairing for Listener {
                                         .await
                                         .expect("Failed to insert document");
                                 }
+                                bar.finish();
+                                info!("Embedded {}", path.display());
                             }
                         }
-                        notify::EventKind::Remove(_) | notify::EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+                        notify::EventKind::Remove(_)
+                        | notify::EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
                             for path in event.paths {
                                 if path.extension().unwrap() != "pdf" {
                                     info!("{} is not a pdf file", path.display());
                                     continue;
                                 }
+
                                 let name = path
                                     .to_str()
                                     .unwrap()
@@ -128,6 +137,7 @@ impl Fairing for Listener {
                                     .execute("DELETE FROM document WHERE name = $1", &[&name])
                                     .await
                                     .expect("Failed to delete document");
+                                info!("Removed {}", path.display());
                             }
                         }
                         _ => {}
