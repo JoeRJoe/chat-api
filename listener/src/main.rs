@@ -9,6 +9,7 @@ use pgvector::Vector;
 use rocket::fairing::{self, Fairing, Info, Kind};
 use rocket::Rocket;
 use rocket_db_pools::{deadpool_postgres, Database};
+use dotenv::dotenv;
 
 #[macro_use]
 extern crate rocket;
@@ -46,11 +47,13 @@ impl Fairing for Listener {
         Self: 'async_trait,
     {
         Box::pin(async move {
+            dotenv().ok();
+            let path = std::env::var("EMBEDDINGS_PATH").expect("EMBEDDINGS_PATH not set in ENV");
             let (sender, receiver) = mpsc::channel::<Result<Event>>();
             let mut watcher = notify::recommended_watcher(sender).unwrap();
             watcher
                 .watch(
-                    Path::new("/home/giorgio-minerba/Documenti/Embeddings"),
+                    Path::new(path.as_str()),
                     RecursiveMode::Recursive,
                 )
                 .unwrap();
