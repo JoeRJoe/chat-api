@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::vec;
 
+use dotenv::dotenv;
 use indicatif::ProgressBar;
 use kalosm::language::{Bert, EmbedderExt};
 use notify::event::{ModifyKind, RenameMode};
@@ -9,8 +10,8 @@ use notify::{Event, RecursiveMode, Result, Watcher};
 use pgvector::Vector;
 use rocket::fairing::{self, Fairing, Info, Kind};
 use rocket::Rocket;
+use rocket_db_pools::deadpool_postgres::Object;
 use rocket_db_pools::{deadpool_postgres, Database};
-use dotenv::dotenv;
 
 #[macro_use]
 extern crate rocket;
@@ -53,24 +54,13 @@ impl Fairing for Listener {
             let (sender, receiver) = mpsc::channel::<Result<Event>>();
             let mut watcher = notify::recommended_watcher(sender).unwrap();
             watcher
-                .watch(
-                    Path::new(path.as_str()),
-                    RecursiveMode::Recursive,
-                )
+                .watch(Path::new(path.as_str()), RecursiveMode::Recursive)
                 .unwrap();
             let db = PgVector::fetch(&rocket).unwrap();
             let vector = db.get().await.unwrap();
             let embedder = Bert::new().await.unwrap();
 
-            vector.execute("CREATE EXTENSION vector", &[]).await.expect("Failed to create extension vector");
-            vector.execute("CREATE TABLE IF NOT EXISTS document (
-                id SERIAL PRIMARY KEY,
-                embedding vector(384),
-                text TEXT,
-                name TEXT
-            )", &[])
-            .await
-            .expect("Failed to create table");
+            initialize_db(&vector).await;
 
             info!("Listener Initialized");
             for event in receiver.into_iter().flatten() {
@@ -162,6 +152,25 @@ impl Fairing for Listener {
             fairing::Result::Ok(rocket)
         })
     }
+}
+
+async fn initialize_db(vector: &Object) {
+    vector
+        .execute("CREATE EXTENSION IF NOT EXISTS vector", &[])
+        .await
+        .expect("Failed to create extension vector");
+    vector
+        .execute(
+            "CREATE TABLE IF NOT EXISTS document (
+                id SERIAL PRIMARY KEY,
+                embedding vector(384),
+                text TEXT,
+                name TEXT
+            )",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
 }
 
 #[derive(Database)]

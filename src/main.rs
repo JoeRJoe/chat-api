@@ -22,7 +22,10 @@ async fn rocket() -> _ {
                         .await
                         .unwrap(),
                 )
-                .with_system_prompt("Questo assistente risponde in maniera semplice e concisa, in italiano, prendendo principalmente le informazioni contenute nel contesto")
+                .with_system_prompt(
+                    "Questo assistente risponde in maniera semplice e concisa, in italiano,
+                    prendendo principalmente le informazioni contenute nel contesto"
+                )
                 .build(),
             ),
         })
