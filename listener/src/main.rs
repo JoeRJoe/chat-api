@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::mpsc;
+use std::vec;
 
 use indicatif::ProgressBar;
 use kalosm::language::{Bert, EmbedderExt};
@@ -60,6 +61,16 @@ impl Fairing for Listener {
             let db = PgVector::fetch(&rocket).unwrap();
             let vector = db.get().await.unwrap();
             let embedder = Bert::new().await.unwrap();
+
+            vector.execute("CREATE EXTENSION vector", &[]).await.expect("Failed to create extension vector");
+            vector.execute("CREATE TABLE IF NOT EXISTS document (
+                id SERIAL PRIMARY KEY,
+                embedding vector(384),
+                text TEXT,
+                name TEXT
+            )", &[])
+            .await
+            .expect("Failed to create table");
 
             info!("Listener Initialized");
             for event in receiver.into_iter().flatten() {
