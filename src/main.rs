@@ -72,7 +72,7 @@ async fn generate_text<'a>(
         "Contesto : {}. Domanda: {}",
         vector
             .query(
-                "SELECT text FROM document ORDER BY embedding <=> $1 LIMIT 5",
+                "SELECT text FROM document WHERE embedded_name <=> $ > 1 ORDER BY embedding <=> $1 LIMIT 5",
                 &[&embedded_prompt_vector],
             )
             .await

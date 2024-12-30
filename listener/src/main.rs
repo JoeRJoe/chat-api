@@ -99,12 +99,15 @@ impl Fairing for Listener {
                                         continue;
                                     }
                                 };
+
+                                let document_name = path.to_str().unwrap().split("/").last().expect("Failed to get document name");
                                 
-                                vector.execute("INSERT INTO document (embedding, text, name) VALUES ($1, $2, $3)", 
+                                vector.execute("INSERT INTO document (embedding, text, name, embedded_name) VALUES ($1, $2, $3, $4)", 
                                 &[
                                     &Vector::from(embeddings.to_vec()),
                                     &chunk,
-                                    &path.to_str().unwrap().split("/").last().expect("Failed to get document name")
+                                    &document_name,
+                                    &Vector::from(embedder.embed(document_name).await.expect("Failed to embed document name").to_vec())
                                     ])
                                     .await
                                     .expect("Failed to insert document");
@@ -157,7 +160,8 @@ async fn initialize_db(vector: &Object) {
                 id SERIAL PRIMARY KEY,
                 embedding vector(384),
                 text TEXT,
-                name TEXT
+                name TEXT,
+                embedded_name vector(384)
             )",
             &[],
         )
