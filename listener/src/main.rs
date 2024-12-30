@@ -77,33 +77,21 @@ impl Fairing for Listener {
                             let bytes = std::fs::read(&path).expect("Failed to read file");
                             let text = pdf_extract::extract_text_from_mem(&bytes)
                                 .expect("Filed to extract text");
-                            let chunks = text.split("\n\n").collect::<Vec<_>>();
-                            let bar = ProgressBar::new(chunks.len() as u64);
-                            let mut neighbors = vec!["".to_string(); chunks.len()];
-
-                            for (i, chunk_a) in chunks.iter().enumerate() {
-                                let embed_a =
-                                    embedder.embed(chunk_a).await.expect("Failed to embed text");
-                                for chunk_b in chunks.iter().skip(i + 1) {
-                                    let embed_b = embedder
-                                        .embed(chunk_b)
-                                        .await
-                                        .expect("Failed to embed text");
-                                    let is_neighbor = embed_a.cosine_similarity(&embed_b) > 0.7;
-                                    neighbors[i] = chunk_a.to_string();
-                                    if is_neighbor {
-                                        neighbors[i] += format!("\n{}", chunk_b).as_str();
-                                    }
-                                }
-                                bar.inc(1);
+                            let words = text.split_whitespace().collect::<Vec<_>>();
+                            let mut chunks: Vec<String> = Vec::new();
+                            for chunk in words.chunks(100) {
+                                    chunks.push(chunk.join(" "));
                             }
-                            bar.finish();
 
-                            for chunk in neighbors {
+                            
+                            let main_bar = ProgressBar::new(chunks.len() as u64);
+                            main_bar.inc(0);
+                            
+                            for chunk in chunks {
                                 if chunk.is_empty() {
                                     continue;
                                 }
-
+                                
                                 let embeddings = match embedder.embed(&chunk).await {
                                     Ok(embeddings) => embeddings,
                                     Err(_) => {
@@ -111,16 +99,20 @@ impl Fairing for Listener {
                                         continue;
                                     }
                                 };
-
+                                
                                 vector.execute("INSERT INTO document (embedding, text, name) VALUES ($1, $2, $3)", 
-                                        &[
-                                            &Vector::from(embeddings.to_vec()),
-                                            &chunk,
-                                            &path.to_str().unwrap().split("/").last().expect("Failed to get document name")
-                                        ])
-                                        .await
-                                        .expect("Failed to insert document");
+                                &[
+                                    &Vector::from(embeddings.to_vec()),
+                                    &chunk,
+                                    &path.to_str().unwrap().split("/").last().expect("Failed to get document name")
+                                    ])
+                                    .await
+                                    .expect("Failed to insert document");
+
+                                main_bar.inc(1);
+
                             }
+                            main_bar.finish();
                             info!("Embedded {}", path.display());
                         }
                     }
