@@ -23,7 +23,7 @@ async fn rocket() -> _ {
                         .unwrap(),
                 )
                 .with_system_prompt(
-                    "Questo assistente risponde in maniera semplice e concisa, in italiano,
+                    "Questo assistente risponde in maniera precisa, senza inventare nulla, in italiano,
                     prendendo principalmente le informazioni contenute nel contesto"
                 )
                 .build(),
@@ -48,6 +48,7 @@ struct EmbedderWrapper {
 #[derive(Serialize)]
 #[serde(crate = "rocket::serde")]
 struct GeneratedText<'a> {
+    context: String,
     prompt: &'a str,
     text: String,
 }
@@ -72,7 +73,7 @@ async fn generate_text<'a>(
         "Contesto : {}. Domanda: {}",
         vector
             .query(
-                "SELECT text FROM document WHERE embedded_name <=> $ > 1 ORDER BY embedding <=> $1 LIMIT 5",
+                "SELECT text FROM document WHERE embedded_name <-> $1 > 0.7 ORDER BY embedding <=> $1 LIMIT 5",
                 &[&embedded_prompt_vector],
             )
             .await
@@ -85,6 +86,7 @@ async fn generate_text<'a>(
     );
 
     Json(GeneratedText {
+        context: context.clone(),
         prompt,
         text: chat_wrapper
             .chat
