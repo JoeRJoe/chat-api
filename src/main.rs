@@ -48,7 +48,6 @@ struct EmbedderWrapper {
 #[derive(Serialize)]
 #[serde(crate = "rocket::serde")]
 struct GeneratedText<'a> {
-    context: String,
     prompt: &'a str,
     text: String,
 }
@@ -86,7 +85,6 @@ async fn generate_text<'a>(
     );
 
     Json(GeneratedText {
-        context: context.clone(),
         prompt,
         text: chat_wrapper
             .chat
