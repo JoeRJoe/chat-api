@@ -52,12 +52,14 @@ struct GeneratedText<'a> {
     text: String,
 }
 
-#[post("/", data = "<prompt>")]
+#[post("/<ampiezza_scelta_documenti>/<documenti_da_prendere>", data = "<prompt>")]
 async fn generate_text<'a>(
     vector: Connection<PgVector>,
     embedder_wrapper: &State<EmbedderWrapper>,
     chat_wrapper: &State<ChatWrapper>,
     prompt: &'a str,
+    ampiezza_scelta_documenti: f32,
+    documenti_da_prendere: u32,
 ) -> Json<GeneratedText<'a>> {
     let embedded_prompt_vector = Vector::from(
         embedder_wrapper
@@ -72,8 +74,8 @@ async fn generate_text<'a>(
         "Contesto : {}. Domanda: {}",
         vector
             .query(
-                "SELECT text FROM document WHERE embedded_name <-> $1 > 0.5 ORDER BY embedding <=> $1 LIMIT 3",
-                &[&embedded_prompt_vector],
+                "SELECT text FROM document WHERE embedded_name <-> $1 > $2 ORDER BY embedding <=> $1 LIMIT $3",
+                &[&embedded_prompt_vector, &ampiezza_scelta_documenti, &documenti_da_prendere],
             )
             .await
             .expect("Failed to find nearest neighbors")
